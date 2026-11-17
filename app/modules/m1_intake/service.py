@@ -27,7 +27,7 @@ from ...reasons import (
 from . import columns, decode, reader
 
 PAYLOAD_FIELDS = ("supplier_no", "raw_name", "tax_id", "city", "bank_account",
-                  "erp", "ref_master_id", "ytd_amount")
+                  "erp", "ref_master_id", "group_key", "group_name", "ytd_amount")
 
 
 def _safe_name(name: str) -> str:
@@ -61,6 +61,8 @@ def _row_record(index, cells, raw, source, line_no):
         "bank_account": columns.clean_code(values["bank_account"]),
         "erp": columns.clean_text(values["erp_source"]),
         "ref_master_id": columns.clean_code(values["ref_master_id"]),
+        "group_key": columns.clean_group(values["group_key"]),
+        "group_name": columns.clean_group(values["group_name"]),
         "ytd_amount": str(amount if amount is not None else "0.00"),
         "flags": json.dumps(sorted(set(amount_flags + tax_flags)), ensure_ascii=False),
         "source_file": source,

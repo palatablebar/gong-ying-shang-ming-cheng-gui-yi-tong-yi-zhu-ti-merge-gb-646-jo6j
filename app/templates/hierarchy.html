@@ -1,0 +1,149 @@
+{% extends "base.html" %}
+{% block body %}
+<section class="panel">
+  <div class="panel-head">
+    <h1 class="panel-title">付款主体与集团归集</h1>
+    <div class="panel-num">{{ summary.counts.subjects }} 个付款主体 · {{ summary.counts.groups }} 个集团 · {{ ledger.subject_total|money }} 元</div>
+    <button type="button" class="btn" data-action="publish-hierarchy">重新发布</button>
+  </div>
+  <p class="hint">
+    付款按下方<strong>付款主体</strong>逐笔执行：每个主体只有一个税号与唯一收款账户。
+    <strong>集团</strong>只是上层归集，用于采购口径的用量与返利，本身没有税号和账户，不可直接付款。
+  </p>
+  <div class="grid-two">
+    <table class="tbl tbl-tight">
+      <thead><tr><th>对账项</th><th class="num">左</th><th class="num">右</th><th>结论</th></tr></thead>
+      <tbody>
+        <tr><td>主体记录守恒</td><td class="num">{{ ledger.members }}</td><td class="num">{{ summary.counts.records }}</td><td><span class="tag {{ 'tag-ok' if ledger.members == summary.counts.records else 'tag-bad' }}">{{ '通过' if ledger.members == summary.counts.records else '异常' }}</span></td></tr>
+        <tr><td>主体金额 = 分摊</td><td class="num">{{ ledger.subject_total|money }}</td><td class="num">{{ ledger.share_total|money }}</td><td><span class="tag {{ 'tag-ok' if ledger.subject_total == ledger.share_total else 'tag-bad' }}">{{ '通过' if ledger.subject_total == ledger.share_total else '异常' }}</span></td></tr>
+        <tr><td>有标识主体 = 集团</td><td class="num">{{ ledger.grouped_subject_total|money }}</td><td class="num">{{ ledger.group_total|money }}</td><td><span class="tag {{ 'tag-ok' if ledger.grouped_subject_total == ledger.group_total else 'tag-bad' }}">{{ '通过' if ledger.grouped_subject_total == ledger.group_total else '异常' }}</span></td></tr>
+        <tr><td>未归集主体金额</td><td class="num">{{ ledger.ungrouped_subject_total|money }}</td><td class="num">—</td><td><span class="tag">未归集</span></td></tr>
+      </tbody>
+    </table>
+    <table class="tbl tbl-tight">
+      <thead><tr><th>层级版本</th><th>变化层</th><th>发布时间</th></tr></thead>
+      <tbody>
+        {% for version in versions %}
+        <tr>
+          <td class="mono">{{ version.version_id }}{% if loop.first %} <span class="tag tag-ok">当前</span>{% endif %}</td>
+          <td class="mono">{{ version.changed_levels|join(' ') or '—' }}</td>
+          <td>{{ version.published_at|ts }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section class="panel">
+  <div class="panel-head">
+    <h2 class="panel-title">集团归集</h2>
+    <div class="panel-num">{{ groups|length }} 个集团 · 仅汇总，不可付款 · 本次重算 {{ summary.counts.recomputed_groups }} / 复用 {{ summary.counts.reused_groups }}</div>
+  </div>
+  <table class="tbl">
+    <thead><tr><th>集团</th><th>集团名称</th><th class="num">付款主体</th><th class="num">成员</th><th class="num">本年累计(元)</th><th>状态</th><th>归集依据</th></tr></thead>
+    <tbody>
+      {% for group in groups %}
+      <tr>
+        <td class="mono">{{ group.group_id }}<span class="sub mono">{{ group.group_key }}</span></td>
+        <td>{{ group.group_name or '—' }}</td>
+        <td class="num">{{ group.subject_count }}</td>
+        <td class="num">{{ group.member_count }}</td>
+        <td class="num strong">{{ group.total_amount|money }}</td>
+        <td>{% if group.status %}<span class="tag tag-warn">{{ reasons.get(group.status) }}</span>{% else %}<span class="tag tag-ok">已归集</span>{% endif %}</td>
+        <td class="clip" title="{{ group.basis }}">{{ group.basis }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% if not groups %}<p class="empty">本批没有带集团标识的记录。</p>{% endif %}
+</section>
+
+<section class="panel">
+  <div class="panel-head">
+    <h2 class="panel-title">付款主体</h2>
+    <div class="panel-num">{{ subjects|length }} 个 · 一个税号一个主体，付款前核对账户 · 本次重算 {{ summary.counts.recomputed_subjects }} / 复用 {{ summary.counts.reused_subjects }}</div>
+  </div>
+  <table class="tbl">
+    <thead><tr><th>主体</th><th>税号</th><th>收款账户</th><th>集团</th><th class="num">成员</th><th class="num">累计(元)</th><th>状态</th><th>归集依据</th><th>确认</th><th class="spacer"></th></tr></thead>
+    <tbody>
+      {% for subject in subjects %}
+      <tr>
+        <td class="mono">{{ subject.subject_id }}</td>
+        <td class="mono">{% if subject.tax_id %}{{ subject.tax_id }}{% else %}<span class="tag tag-warn">无税号</span>{% endif %}</td>
+        <td class="mono">{% if subject.accounts %}{{ subject.accounts|join(' ') }}{% if subject.accounts|length > 1 %}<span class="tag tag-warn">多账户</span>{% endif %}{% else %}<span class="tag tag-warn">无账户</span>{% endif %}</td>
+        <td class="mono">{{ subject.group_id or '—' }}</td>
+        <td class="num">{{ subject.member_count }}</td>
+        <td class="num">{{ subject.total_amount|money }}</td>
+        <td>
+          {% for code in subject.codes %}
+          <span class="tag tag-warn">{{ reasons.get(code) }}</span>
+          {% else %}
+          <span class="tag tag-ok">可付款</span>
+          {% endfor %}
+        </td>
+        <td class="clip" title="{{ subject.basis }}">{{ subject.basis }}</td>
+        <td>
+          {% set record = confirmations.get(subject.subject_key) %}
+          {% if record and record.applicable %}
+          <span class="tag tag-ok">{{ '已确认' if record.decision == 'confirm' else '已否定' }}</span>
+          {% elif record %}
+          <span class="tag tag-warn">待重新确认</span>
+          {% else %}
+          <span class="tag">未确认</span>
+          {% endif %}
+        </td>
+        <td class="spacer">
+          <details class="fold">
+            <summary>{{ subject.member_count }} 条成员</summary>
+            <table class="tbl tbl-inner">
+              <thead><tr><th>供应商号</th><th>名称</th><th>税号</th><th>账户</th><th class="num">累计</th><th class="num">分摊</th></tr></thead>
+              <tbody>
+                {% for member in subject.members %}
+                <tr>
+                  <td class="mono">{{ member.supplier_id }}</td>
+                  <td class="clip" title="{{ member.name }}">{{ member.name }}</td>
+                  <td class="mono">{{ member.tax_id or '—' }}</td>
+                  <td class="mono">{{ member.bank_account or '—' }}</td>
+                  <td class="num">{{ member.amount|money }}</td>
+                  <td class="num">{{ member.share_amount|money }}</td>
+                </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+            {% if record and record.applicable %}
+            <p class="stat-line">确认人 {{ record.operator }} · {{ record.decided_at|ts }}</p>
+            {% elif record %}
+            <p class="stat-line">身份或成员已变化，原确认（{{ record.operator }} {{ record.decided_at|ts }}）不再适用。</p>
+            {% endif %}
+            <button type="button" class="btn btn-sm" data-confirm="subject" data-key="{{ subject.subject_key }}" data-fingerprint="{{ subject.fingerprint }}" data-decision="confirm">确认主体</button>
+            <button type="button" class="btn btn-sm btn-ghost" data-confirm="subject" data-key="{{ subject.subject_key }}" data-fingerprint="{{ subject.fingerprint }}" data-decision="reject">标记待核</button>
+          </details>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</section>
+
+<section class="panel">
+  <div class="panel-head">
+    <h2 class="panel-title">发布记录</h2>
+    <div class="panel-num">{{ publish_log|length }} 次</div>
+  </div>
+  <table class="tbl tbl-tight">
+    <thead><tr><th>时间</th><th>结果</th><th>层级</th><th>指纹</th></tr></thead>
+    <tbody>
+      {% for item in publish_log %}
+      <tr>
+        <td>{{ item.created_at|ts }}</td>
+        <td><span class="tag {{ 'tag-ok' if item.status == 'published' else 'tag-bad' }}">{{ '已发布' if item.status == 'published' else '失败' }}</span></td>
+        <td class="mono">{{ item.detail }}</td>
+        <td class="mono">{{ item.fingerprint[:12] }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% if not publish_log %}<p class="empty">还没有发布记录。</p>{% endif %}
+</section>
+{% endblock %}

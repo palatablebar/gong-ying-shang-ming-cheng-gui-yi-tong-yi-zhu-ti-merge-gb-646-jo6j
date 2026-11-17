@@ -91,6 +91,31 @@
 
 <section class="panel">
   <div class="panel-head">
+    <h2 class="panel-title">付款主体与集团归集</h2>
+    <div class="panel-num">{{ hierarchy.counts.subjects }} 个付款主体 · {{ hierarchy.counts.groups }} 个集团 · {{ hierarchy_ledger.subject_total|money }} 元</div>
+    <a class="btn btn-link" href="/hierarchy">明细</a>
+  </div>
+  <p class="hint">付款按付款主体执行（一个税号一个主体）；集团仅做上层归集，看用量与返利，不可直接付款。</p>
+  <table class="tbl tbl-tight">
+    <thead><tr><th>集团</th><th>集团名称</th><th class="num">付款主体</th><th class="num">成员</th><th class="num">本年累计(元)</th><th>状态</th></tr></thead>
+    <tbody>
+      {% for group in hierarchy_groups %}
+      <tr>
+        <td class="mono">{{ group.group_id }}<span class="sub mono">{{ group.group_key }}</span></td>
+        <td>{{ group.group_name or '—' }}</td>
+        <td class="num">{{ group.subject_count }}</td>
+        <td class="num">{{ group.member_count }}</td>
+        <td class="num">{{ group.total_amount|money }}</td>
+        <td>{% if group.status %}<span class="tag tag-warn">{{ reasons.get(group.status) }}</span>{% else %}<span class="tag tag-ok">已归集</span>{% endif %}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  <div class="stat-line">未归集主体 {{ hierarchy.counts.ungrouped_subjects }} 个 · 多账户 {{ hierarchy.counts.multi_account }} · 无账户 {{ hierarchy.counts.no_account }} · 无税号 {{ hierarchy.counts.no_tax }} · 层级版本 {{ hierarchy.version_id }}</div>
+</section>
+
+<section class="panel">
+  <div class="panel-head">
     <h2 class="panel-title">采信诊断</h2>
     <div class="panel-num">{{ counts.files }} 个文件 · {{ counts.input_rows }} 行 · 采纳 {{ counts.accepted }}</div>
     <a class="btn btn-link" href="/api/suppliers/import" target="_blank" rel="noopener">接口</a>

@@ -13,6 +13,7 @@ PAGES = (
     ("/pairs", "候选对"),
     ("/clusters", "合并簇"),
     ("/reviews", "复核队列"),
+    ("/hierarchy", "付款主体与集团归集"),
     ("/export", "主数据导出"),
 )
 
@@ -47,6 +48,14 @@ def test_main_flow_from_dirty_samples(client):
     payload = json.loads(manifest.text)
     assert payload["reconcile"]["ok"] is True
     assert payload["run_id"] == EXP.RUN_ID
+
+    hierarchy = client.get("/api/hierarchy").json()
+    assert hierarchy["reconcile"]["ok"] is True
+    payable = client.get("/api/export/payable-subjects.csv")
+    assert payable.status_code == 200
+    assert payable.text.startswith("\ufeff付款主体编号")
+    groups = client.get("/api/export/groups.csv")
+    assert "否（仅归集）" in groups.text
 
 
 def test_rerun_same_input_same_numbers(client):

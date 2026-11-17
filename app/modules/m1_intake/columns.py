@@ -57,6 +57,14 @@ def clean_code(raw: str) -> str:
     return raw.strip().strip("\ufeff")
 
 
+def clean_group(raw: str) -> str:
+    """集团标识/名称：去空白与前导 BOM，空值哨兵视为没有集团标识。"""
+    value = raw.strip().strip("\ufeff")
+    if is_sentinel(value):
+        return ""
+    return value
+
+
 def clean_text(raw: str) -> str:
     value = raw.strip()
     if is_sentinel(value):

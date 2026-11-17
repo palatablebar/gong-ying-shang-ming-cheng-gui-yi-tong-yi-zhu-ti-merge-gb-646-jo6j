@@ -6,12 +6,64 @@
     <div class="panel-num">{{ ledger.subjects }} 个主体 · {{ ledger.amount_clusters|money }} 元</div>
   </div>
   <div class="btn-row">
-    <a class="btn" href="/api/export/master.csv" download>主数据 CSV</a>
-    <a class="btn" href="/api/export/members.csv" download>成员分摊 CSV</a>
-    <a class="btn" href="/api/export/quarantine.csv" download>隔离区 CSV</a>
-    <a class="btn" href="/api/export/conflicts.csv" download>冲突 CSV</a>
+    <a class="btn" href="/api/export/payable-subjects.csv" download>付款主体 CSV</a>
+    <a class="btn" href="/api/export/hierarchy-members.csv" download>层级成员 CSV</a>
+    <a class="btn" href="/api/export/groups.csv" download>集团归集 CSV</a>
+  </div>
+  <div class="btn-row">
+    <a class="btn btn-ghost" href="/api/export/master.csv" download>合并簇证据 CSV（不用于付款）</a>
+    <a class="btn btn-ghost" href="/api/export/members.csv" download>合并簇成员 CSV（证据）</a>
+    <a class="btn btn-ghost" href="/api/export/quarantine.csv" download>隔离区 CSV</a>
+    <a class="btn btn-ghost" href="/api/export/conflicts.csv" download>冲突 CSV</a>
     <a class="btn btn-ghost" href="/api/export/manifest.json" download>运行清单</a>
   </div>
+  <p class="hint">付款主体与集团归集来自同一层级版本 {{ hierarchy.version_id }}；集团文件明确标注不可直接付款。</p>
+</section>
+
+<section class="panel">
+  <div class="panel-head">
+    <h2 class="panel-title">集团归集预览</h2>
+    <div class="panel-num">{{ hierarchy.counts.groups }} 个集团 · {{ hierarchy_ledger.group_total|money }} 元 · 仅归集</div>
+  </div>
+  <table class="tbl">
+    <thead><tr><th>集团</th><th>集团名称</th><th class="num">付款主体</th><th class="num">成员</th><th class="num">本年累计(元)</th><th>状态</th><th>归集依据</th></tr></thead>
+    <tbody>
+      {% for group in groups %}
+      <tr>
+        <td class="mono">{{ group.group_id }}<span class="sub mono">{{ group.group_key }}</span></td>
+        <td>{{ group.group_name or '—' }}</td>
+        <td class="num">{{ group.subject_count }}</td>
+        <td class="num">{{ group.member_count }}</td>
+        <td class="num">{{ group.total_amount|money }}</td>
+        <td><span class="tag">不可付款</span></td>
+        <td class="clip" title="{{ group.basis }}">{{ group.basis }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</section>
+
+<section class="panel">
+  <div class="panel-head">
+    <h2 class="panel-title">付款主体预览</h2>
+    <div class="panel-num">前 {{ subjects|length }} 个 · {{ hierarchy.counts.subjects }} 个主体</div>
+  </div>
+  <table class="tbl">
+    <thead><tr><th>主体</th><th>税号</th><th>收款账户</th><th class="num">成员</th><th class="num">累计(元)</th><th>状态</th><th>归集依据</th></tr></thead>
+    <tbody>
+      {% for subject in subjects %}
+      <tr>
+        <td class="mono">{{ subject.subject_id }}</td>
+        <td class="mono">{{ subject.tax_id or '—' }}</td>
+        <td class="mono">{{ subject.accounts|join(' ') or '—' }}</td>
+        <td class="num">{{ subject.member_count }}</td>
+        <td class="num">{{ subject.total_amount|money }}</td>
+        <td>{% for code in subject.codes %}<span class="tag tag-warn">{{ reasons.get(code) }}</span>{% else %}<span class="tag tag-ok">可付款</span>{% endfor %}</td>
+        <td class="clip" title="{{ subject.basis }}">{{ subject.basis }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
 </section>
 
 <section class="panel">

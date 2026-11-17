@@ -43,7 +43,7 @@ def test_short_row_quarantined(run):
     assert len(short) == 1
     assert short[0]["source_file"] == "erp_b_alias_bom.csv"
     assert short[0]["line_no"] == 21
-    assert short[0]["detail"] == "3/10"
+    assert short[0]["detail"] == "3/12"
     assert "滇池园林绿化" in short[0]["raw_line"]
 
 

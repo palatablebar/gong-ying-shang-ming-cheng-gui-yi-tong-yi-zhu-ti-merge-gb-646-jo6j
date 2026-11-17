@@ -66,7 +66,24 @@
           return postJson('/api/suppliers/import', { force: true })
             .then(function () { window.location.reload(); });
         }
+        if (name === 'publish-hierarchy') {
+          return postJson('/api/hierarchy/publish', {})
+            .then(function () { window.location.reload(); });
+        }
         return Promise.resolve();
+      });
+      return;
+    }
+
+    var confirmButton = event.target.closest('[data-confirm]');
+    if (confirmButton) {
+      run(confirmButton, function () {
+        return postJson('/api/hierarchy/confirm', {
+          scope: confirmButton.getAttribute('data-confirm'),
+          target_key: confirmButton.getAttribute('data-key'),
+          expected_fingerprint: confirmButton.getAttribute('data-fingerprint'),
+          decision: confirmButton.getAttribute('data-decision')
+        }).then(function () { window.location.reload(); });
       });
       return;
     }

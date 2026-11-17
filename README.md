@@ -16,6 +16,8 @@
   簇金额与成员分摊用 Decimal 逐分守恒。
 - 复核：队列按得分降序，决定带版本乐观锁，写入后簇立即重算；引用异常四类可查。
 - 导出：主数据、成员分摊、隔离区、冲突、运行清单（含 `run_id` 与输入 sha256）。
+- 付款层级：付款主体按税号与收款账户独立成层，集团标识只做上层归集；
+  集团行没有税号与账户、不可直接付款，采购看集团口径、财务按主体付款。
 
 ## 模块清单
 
@@ -27,12 +29,14 @@
 | M4 相似判定 | `POST /api/pairs` | 加权得分与四级优先判定 |
 | M5 等价类合并 | `POST /api/clusters` | 并查集、代表元、最大余额分摊 |
 | M6 复核批次 | `POST /api/reviews/{pair_id}/decision` | 队列、版本锁、引用一致性 |
+| M8 付款主体与集团归集 | `GET /api/hierarchy` | 税号/账户识别主体、集团归集、按层重算、事务发布 |
 | M7 主数据导出 | `GET /api/export/master.csv` | CSV 与运行清单，UTF-8 BOM |
 
 ## 页面
 
 `/` 台账总览（含采信诊断与隔离区）、`/normalize` 名称归一、`/pairs` 候选对、
-`/clusters` 合并簇、`/reviews` 复核队列、`/export` 主数据导出。
+`/clusters` 合并簇、`/reviews` 复核队列、`/hierarchy` 付款主体与集团归集、
+`/export` 主数据导出。
 接口文档在 `/docs`。
 
 ## 核心规则
@@ -42,6 +46,9 @@
 3. 判定优先级：税号冲突（拒绝） > 税号相同（自动） > 城市不同（复核） > 得分分档。
 4. 代表元 = 簇内税号最小者；无税号取供应商号最小者。
 5. 簇金额 = Σ成员金额（Decimal）；成员分摊按比例取整到分后最大余额补齐。
+6. 付款主体 = 税号优先、账户兜底的独立收款主体；集团标识只形成上层归集，不形成付款主体。
+7. 层级带四层指纹：改名只重算展示层，换税号/账户才失效受影响主体的确认；
+   发布单事务提交，失败保留旧版，同批重跑不新增主体。
 
 字段类型、单位、空值与哨兵、时间与区间定义见 `docs/DATA-DICTIONARY.md`；
 陷阱清单与对账规则见 `docs/DEPTH.md`；运维动作见 `docs/RUNBOOK.md`。
@@ -73,14 +80,15 @@ docker compose exec -T app python -m pytest -q
 docker compose exec -T app python -m pytest -q
 ```
 
-81 条测试：每个模块 8 到 13 条，另有端到端 4 条与不变量 5 条。
+106 条测试：每个模块 8 到 25 条，另有端到端 4 条与不变量 5 条。
 
 ## 目录
 
 ```text
 app/main.py config.py errors.py reasons.py manifest.py store.py web.py
 app/modules/m1_intake … m7_export/{handler.py service.py 规则与读写出}
-app/templates/{base.html + 6 页}
+app/modules/m8_hierarchy/{identity.py build.py service.py export_out.py handler.py}
+app/templates/{base.html + 7 页}
 app/static/{theme.css layout.css components.css app.js table.js charts.js}
 docs/{DEPTH.md DATA-DICTIONARY.md RUNBOOK.md}
 sample_data/ 六个脏样例

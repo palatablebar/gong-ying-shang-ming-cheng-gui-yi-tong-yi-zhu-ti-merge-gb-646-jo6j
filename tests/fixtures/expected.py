@@ -4,7 +4,7 @@
 """
 from decimal import Decimal
 
-RUN_ID = "MR-8FC3B362EC8F"
+RUN_ID = "MR-6A242153D036"
 
 INPUT_ROWS = 73
 ACCEPTED = 70

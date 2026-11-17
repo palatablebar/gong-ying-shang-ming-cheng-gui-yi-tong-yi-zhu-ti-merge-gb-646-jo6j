@@ -34,6 +34,8 @@ SCHEMA = (
         bank_account TEXT NOT NULL DEFAULT '',
         erp TEXT NOT NULL DEFAULT '',
         ref_master_id TEXT NOT NULL DEFAULT '',
+        group_key TEXT NOT NULL DEFAULT '',
+        group_name TEXT NOT NULL DEFAULT '',
         ytd_amount TEXT NOT NULL DEFAULT '0.00',
         flags TEXT NOT NULL DEFAULT '[]',
         source_file TEXT NOT NULL DEFAULT '',
@@ -103,6 +105,93 @@ SCHEMA = (
         share_amount TEXT NOT NULL,
         PRIMARY KEY (run_id, cluster_id, supplier_id)
     )""",
+    """CREATE TABLE IF NOT EXISTS hierarchy_versions (
+        version_id TEXT PRIMARY KEY,
+        run_id TEXT NOT NULL,
+        fingerprint TEXT NOT NULL,
+        parent_version TEXT NOT NULL DEFAULT '',
+        rule_version TEXT NOT NULL,
+        hierarchy_version TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'published',
+        created_at TEXT NOT NULL,
+        published_at TEXT NOT NULL,
+        changed_levels TEXT NOT NULL DEFAULT '[]',
+        affected_subjects TEXT NOT NULL DEFAULT '[]',
+        affected_groups TEXT NOT NULL DEFAULT '[]',
+        counts_json TEXT NOT NULL DEFAULT '{}',
+        checks_json TEXT NOT NULL DEFAULT '[]',
+        note TEXT NOT NULL DEFAULT ''
+    )""",
+    """CREATE TABLE IF NOT EXISTS hierarchy_subjects (
+        version_id TEXT NOT NULL,
+        subject_id TEXT NOT NULL,
+        subject_key TEXT NOT NULL,
+        tax_id TEXT NOT NULL DEFAULT '',
+        accounts_json TEXT NOT NULL DEFAULT '[]',
+        group_id TEXT NOT NULL DEFAULT '',
+        group_key TEXT NOT NULL DEFAULT '',
+        group_name TEXT NOT NULL DEFAULT '',
+        member_count INTEGER NOT NULL,
+        total_amount TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT '',
+        codes_json TEXT NOT NULL DEFAULT '[]',
+        basis TEXT NOT NULL DEFAULT '',
+        members_json TEXT NOT NULL DEFAULT '[]',
+        fingerprint TEXT NOT NULL,
+        PRIMARY KEY (version_id, subject_id)
+    )""",
+    """CREATE TABLE IF NOT EXISTS hierarchy_groups (
+        version_id TEXT NOT NULL,
+        group_id TEXT NOT NULL,
+        group_key TEXT NOT NULL,
+        group_name TEXT NOT NULL DEFAULT '',
+        subject_count INTEGER NOT NULL,
+        member_count INTEGER NOT NULL,
+        total_amount TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT '',
+        codes_json TEXT NOT NULL DEFAULT '[]',
+        basis TEXT NOT NULL DEFAULT '',
+        subjects_json TEXT NOT NULL DEFAULT '[]',
+        fingerprint TEXT NOT NULL,
+        PRIMARY KEY (version_id, group_id)
+    )""",
+    """CREATE TABLE IF NOT EXISTS hierarchy_members (
+        version_id TEXT NOT NULL,
+        subject_id TEXT NOT NULL,
+        supplier_id TEXT NOT NULL,
+        share_amount TEXT NOT NULL,
+        PRIMARY KEY (version_id, subject_id, supplier_id)
+    )""",
+    """CREATE TABLE IF NOT EXISTS hierarchy_records (
+        version_id TEXT NOT NULL,
+        supplier_id TEXT NOT NULL,
+        subject_key TEXT NOT NULL,
+        group_key TEXT NOT NULL DEFAULT '',
+        name_fp TEXT NOT NULL,
+        identity_fp TEXT NOT NULL,
+        group_fp TEXT NOT NULL,
+        amount TEXT NOT NULL,
+        PRIMARY KEY (version_id, supplier_id)
+    )""",
+    """CREATE TABLE IF NOT EXISTS hierarchy_confirmations (
+        scope TEXT NOT NULL,
+        target_key TEXT NOT NULL,
+        fingerprint TEXT NOT NULL,
+        decision TEXT NOT NULL,
+        operator TEXT NOT NULL,
+        decided_at TEXT NOT NULL,
+        version_id TEXT NOT NULL DEFAULT '',
+        stale INTEGER NOT NULL DEFAULT 0,
+        PRIMARY KEY (scope, target_key)
+    )""",
+    """CREATE TABLE IF NOT EXISTS hierarchy_publish_log (
+        seq INTEGER PRIMARY KEY AUTOINCREMENT,
+        run_id TEXT NOT NULL,
+        fingerprint TEXT NOT NULL,
+        status TEXT NOT NULL,
+        detail TEXT NOT NULL DEFAULT '',
+        created_at TEXT NOT NULL
+    )""",
     """CREATE TABLE IF NOT EXISTS decisions (
         run_id TEXT NOT NULL,
         pair_id TEXT NOT NULL,
@@ -116,10 +205,22 @@ SCHEMA = (
     "CREATE INDEX IF NOT EXISTS idx_records_run ON records(run_id)",
     "CREATE INDEX IF NOT EXISTS idx_quarantine_run ON quarantine(run_id)",
     "CREATE INDEX IF NOT EXISTS idx_pairs_run ON pair_scores(run_id)",
+    "CREATE INDEX IF NOT EXISTS idx_hv_run ON hierarchy_versions(run_id)",
+    "CREATE INDEX IF NOT EXISTS idx_hsub_version ON hierarchy_subjects(version_id)",
+    "CREATE INDEX IF NOT EXISTS idx_hgroup_version ON hierarchy_groups(version_id)",
+)
+
+# 旧库补列：CREATE TABLE IF NOT EXISTS 不会为已存在的表加列。
+MIGRATIONS = (
+    ("records", "group_key", "TEXT NOT NULL DEFAULT ''"),
+    ("records", "group_name", "TEXT NOT NULL DEFAULT ''"),
 )
 
 TABLES = ("runs", "records", "quarantine", "conflicts", "blocks", "block_pairs",
-          "pair_scores", "clusters", "cluster_members", "decisions")
+          "pair_scores", "clusters", "cluster_members", "decisions",
+          "hierarchy_versions", "hierarchy_subjects", "hierarchy_groups",
+          "hierarchy_members", "hierarchy_records", "hierarchy_confirmations",
+          "hierarchy_publish_log")
 
 
 def db_path() -> Path:
@@ -141,6 +242,11 @@ def init_db(path=None) -> None:
     with connect(path) as conn:
         for statement in SCHEMA:
             conn.execute(statement)
+        for table, column, ddl in MIGRATIONS:
+            existing = {row["name"] for row in
+                        conn.execute(f"PRAGMA table_info({table})").fetchall()}
+            if column not in existing:
+                conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {ddl}")
         conn.commit()
 
 
@@ -216,12 +322,14 @@ def save_records(run_id: str, records) -> None:
     with connect() as conn:
         conn.executemany(
             "INSERT OR REPLACE INTO records (run_id, supplier_id, supplier_no, raw_name,"
-            " norm_name, norm_codes, tax_id, city, bank_account, erp, ref_master_id, ytd_amount,"
-            " flags, source_file, line_no) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            " norm_name, norm_codes, tax_id, city, bank_account, erp, ref_master_id, group_key,"
+            " group_name, ytd_amount, flags, source_file, line_no)"
+            " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
             [(run_id, r["supplier_id"], r["supplier_no"], r["raw_name"], r.get("norm_name", ""),
               r.get("norm_codes", "[]"), r["tax_id"], r["city"], r["bank_account"], r["erp"],
-              r["ref_master_id"], str(r["ytd_amount"]), r.get("flags", "[]"),
-              r["source_file"], r["line_no"]) for r in records],
+              r["ref_master_id"], r.get("group_key", ""), r.get("group_name", ""),
+              str(r["ytd_amount"]), r.get("flags", "[]"), r["source_file"], r["line_no"])
+             for r in records],
         )
         conn.commit()
 
@@ -407,9 +515,185 @@ def save_decision(decision: dict) -> None:
         conn.commit()
 
 
+def count_version(version_id: str, table: str) -> int:
+    if table not in HIERARCHY_TABLES:
+        raise ValueError(table)
+    with connect() as conn:
+        row = conn.execute(f"SELECT COUNT(*) AS n FROM {table} WHERE version_id = ?",
+                           (version_id,)).fetchone()
+        return int(row["n"])
+
+
 def count(run_id: str, table: str) -> int:
     if table not in TABLES:
         raise ValueError(table)
     with connect() as conn:
         row = conn.execute(f"SELECT COUNT(*) AS n FROM {table} WHERE run_id = ?", (run_id,)).fetchone()
         return int(row["n"])
+
+
+# ---- 层级（付款主体 + 集团归集） ----
+
+HIERARCHY_TABLES = ("hierarchy_subjects", "hierarchy_groups", "hierarchy_members",
+                    "hierarchy_records")
+
+
+def publish_hierarchy(version: dict, subjects, groups, members, records) -> None:
+    """单事务写入一个层级版本；任一步失败回滚，已发布版本保持原样。"""
+    conn = connect()
+    try:
+        conn.execute("BEGIN IMMEDIATE")
+        # 同一指纹并发发布时，后到者覆盖同内容，不会因主键冲突而丢失已发布版本。
+        conn.execute(
+            "INSERT OR REPLACE INTO hierarchy_versions (version_id, run_id, fingerprint,"
+            " parent_version,"
+            " rule_version, hierarchy_version, status, created_at, published_at,"
+            " changed_levels, affected_subjects, affected_groups, counts_json, checks_json, note)"
+            " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            (version["version_id"], version["run_id"], version["fingerprint"],
+             version.get("parent_version", ""), version["rule_version"],
+             version["hierarchy_version"], version.get("status", "published"),
+             version["created_at"], version["published_at"],
+             json.dumps(version.get("changed_levels", []), ensure_ascii=False),
+             json.dumps(version.get("affected_subjects", []), ensure_ascii=False),
+             json.dumps(version.get("affected_groups", []), ensure_ascii=False),
+             json.dumps(version.get("counts", {}), ensure_ascii=False, sort_keys=True),
+             json.dumps(version.get("checks", []), ensure_ascii=False),
+             version.get("note", "")),
+        )
+        for table in HIERARCHY_TABLES:
+            conn.execute(f"DELETE FROM {table} WHERE version_id = ?", (version["version_id"],))
+        conn.executemany(
+            "INSERT INTO hierarchy_subjects (version_id, subject_id, subject_key, tax_id,"
+            " accounts_json, group_id, group_key, group_name, member_count, total_amount,"
+            " status, codes_json, basis, members_json, fingerprint)"
+            " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            [(version["version_id"], s["subject_id"], s["subject_key"], s["tax_id"],
+              json.dumps(s["accounts"], ensure_ascii=False), s["group_id"], s["group_key"],
+              s["group_name"], s["member_count"], str(s["total_amount"]), s["status"],
+              json.dumps(s["codes"], ensure_ascii=False), s["basis"],
+              json.dumps(s["members"], ensure_ascii=False), s["fingerprint"])
+             for s in subjects],
+        )
+        conn.executemany(
+            "INSERT INTO hierarchy_groups (version_id, group_id, group_key, group_name,"
+            " subject_count, member_count, total_amount, status, codes_json, basis,"
+            " subjects_json, fingerprint) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+            [(version["version_id"], g["group_id"], g["group_key"], g["group_name"],
+              g["subject_count"], g["member_count"], str(g["total_amount"]), g["status"],
+              json.dumps([g["status"]] if g["status"] else [], ensure_ascii=False),
+              g["basis"], json.dumps(g["subjects"], ensure_ascii=False), g["fingerprint"])
+             for g in groups],
+        )
+        conn.executemany(
+            "INSERT INTO hierarchy_members (version_id, subject_id, supplier_id, share_amount)"
+            " VALUES (?,?,?,?)",
+            [(version["version_id"], m["subject_id"], m["supplier_id"], str(m["share_amount"]))
+             for m in members],
+        )
+        conn.executemany(
+            "INSERT INTO hierarchy_records (version_id, supplier_id, subject_key, group_key,"
+            " name_fp, identity_fp, group_fp, amount) VALUES (?,?,?,?,?,?,?,?)",
+            [(version["version_id"], r["supplier_id"], r["subject_key"], r["group_key"],
+              r["name_fp"], r["identity_fp"], r["group_fp"], str(r["amount"]))
+             for r in records],
+        )
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
+
+
+def get_hierarchy_version(version_id: str):
+    with connect() as conn:
+        return _one(conn, "SELECT * FROM hierarchy_versions WHERE version_id = ?", (version_id,))
+
+
+def latest_hierarchy(run_id: str = "", published_only: bool = True):
+    with connect() as conn:
+        sql = "SELECT * FROM hierarchy_versions WHERE 1 = 1"
+        params = []
+        if run_id:
+            sql += " AND run_id = ?"
+            params.append(run_id)
+        if published_only:
+            sql += " AND status = 'published'"
+        sql += " ORDER BY published_at DESC, rowid DESC LIMIT 1"
+        return _one(conn, sql, tuple(params))
+
+
+def hierarchy_versions_for(run_id: str, limit: int = 20) -> list:
+    with connect() as conn:
+        return _rows(conn, "SELECT * FROM hierarchy_versions WHERE run_id = ?"
+                           " ORDER BY published_at DESC, rowid DESC LIMIT ?",
+                     (run_id, limit))
+
+
+def list_hierarchy_subjects(version_id: str) -> list:
+    with connect() as conn:
+        return _rows(conn, "SELECT * FROM hierarchy_subjects WHERE version_id = ?"
+                           " ORDER BY subject_id", (version_id,))
+
+
+def list_hierarchy_groups(version_id: str) -> list:
+    with connect() as conn:
+        return _rows(conn, "SELECT * FROM hierarchy_groups WHERE version_id = ?"
+                           " ORDER BY total_amount DESC, group_id", (version_id,))
+
+
+def list_hierarchy_members(version_id: str) -> list:
+    with connect() as conn:
+        return _rows(conn, "SELECT * FROM hierarchy_members WHERE version_id = ?"
+                           " ORDER BY subject_id, supplier_id", (version_id,))
+
+
+def list_hierarchy_records(version_id: str) -> list:
+    with connect() as conn:
+        return _rows(conn, "SELECT * FROM hierarchy_records WHERE version_id = ?"
+                           " ORDER BY supplier_id", (version_id,))
+
+
+def log_publish(run_id: str, fingerprint: str, status: str, detail: str,
+                created_at: str) -> None:
+    with connect() as conn:
+        conn.execute("INSERT INTO hierarchy_publish_log (run_id, fingerprint, status, detail,"
+                     " created_at) VALUES (?,?,?,?,?)",
+                     (run_id, fingerprint, status, detail, created_at))
+        conn.commit()
+
+
+def list_publish_log(run_id: str, limit: int = 20) -> list:
+    with connect() as conn:
+        return _rows(conn, "SELECT * FROM hierarchy_publish_log WHERE run_id = ?"
+                           " ORDER BY seq DESC LIMIT ?", (run_id, limit))
+
+
+# ---- 层级确认 ----
+
+def get_confirmation(scope: str, target_key: str):
+    with connect() as conn:
+        return _one(conn, "SELECT * FROM hierarchy_confirmations"
+                          " WHERE scope = ? AND target_key = ?", (scope, target_key))
+
+
+def list_confirmations(scope: str = "") -> list:
+    with connect() as conn:
+        if scope:
+            return _rows(conn, "SELECT * FROM hierarchy_confirmations WHERE scope = ?"
+                               " ORDER BY decided_at DESC", (scope,))
+        return _rows(conn, "SELECT * FROM hierarchy_confirmations"
+                           " ORDER BY decided_at DESC")
+
+
+def save_confirmation(record: dict) -> None:
+    with connect() as conn:
+        conn.execute(
+            "INSERT OR REPLACE INTO hierarchy_confirmations (scope, target_key, fingerprint,"
+            " decision, operator, decided_at, version_id, stale) VALUES (?,?,?,?,?,?,?,?)",
+            (record["scope"], record["target_key"], record["fingerprint"], record["decision"],
+             record["operator"], record["decided_at"], record.get("version_id", ""),
+             int(record.get("stale", 0))),
+        )
+        conn.commit()

@@ -20,6 +20,7 @@ from .modules.m3_blocks import service as block_service
 from .modules.m4_pairs import service as pair_service
 from .modules.m5_clusters import service as cluster_service
 from .modules.m6_reviews import service as review_service
+from .modules.m8_hierarchy import service as hierarchy_service
 
 TEMPLATE_DIR = Path(__file__).resolve().parent / "templates"
 templates = Jinja2Templates(directory=str(TEMPLATE_DIR))
@@ -30,6 +31,7 @@ NAV = (
     ("pairs", "候选对", "/pairs"),
     ("clusters", "合并簇", "/clusters"),
     ("reviews", "复核", "/reviews"),
+    ("hierarchy", "付款主体", "/hierarchy"),
     ("export", "导出", "/export"),
 )
 
@@ -143,9 +145,13 @@ def page_ledger(request: Request):
     pair_service.ensure_pairs(run_id)
     summary = cluster_service.ensure_clusters(run_id)
     ledger = cluster_service.reconcile(run_id)
+    hierarchy_version = hierarchy_service.ensure(run_id)
     context = base_context(request, "ledger", "台账总览", run)
     context.update({
         "ledger": ledger,
+        "hierarchy": hierarchy_service.summary(run_id),
+        "hierarchy_ledger": hierarchy_service.reconcile(run_id),
+        "hierarchy_groups": hierarchy_service.groups(hierarchy_version["version_id"])[:6],
         "summary": summary,
         "clusters": store.list_clusters(run_id)[:8],
         "pairs": store.list_pairs(run_id)[:8],
@@ -222,14 +228,41 @@ def page_reviews(request: Request):
     return render(request, "reviews.html", context)
 
 
+@router.get("/hierarchy", response_class=HTMLResponse)
+def page_hierarchy(request: Request):
+    run = current_run()
+    run_id = run["run_id"]
+    version = hierarchy_service.ensure(run_id)
+    subject_rows = hierarchy_service.subjects(version["version_id"])
+    group_rows = hierarchy_service.groups(version["version_id"])
+    confirmations = {item["target_key"]: item for item in
+                     hierarchy_service.confirmations(version["version_id"])}
+    context = base_context(request, "hierarchy", "付款主体与集团归集", run)
+    context.update({
+        "summary": hierarchy_service.summary(run_id),
+        "ledger": hierarchy_service.reconcile(run_id),
+        "subjects": subject_rows,
+        "groups": group_rows,
+        "confirmations": confirmations,
+        "versions": hierarchy_service.versions(run_id, 8),
+        "publish_log": hierarchy_service.publish_log(run_id),
+    })
+    return render(request, "hierarchy.html", context)
+
+
 @router.get("/export", response_class=HTMLResponse)
 def page_export(request: Request):
     run = current_run()
     run_id = run["run_id"]
     cluster_service.ensure_clusters(run_id)
+    version = hierarchy_service.ensure(run_id)
     context = base_context(request, "export", "主数据导出", run)
     context.update({
         "ledger": cluster_service.reconcile(run_id),
+        "hierarchy": hierarchy_service.summary(run_id),
+        "hierarchy_ledger": hierarchy_service.reconcile(run_id),
+        "subjects": hierarchy_service.subjects(version["version_id"])[:12],
+        "groups": hierarchy_service.groups(version["version_id"])[:12],
         "clusters": store.list_clusters(run_id)[:12],
         "quarantine": store.list_quarantine(run_id)[:12],
         "files": json.loads(run.get("files_json") or "[]"),

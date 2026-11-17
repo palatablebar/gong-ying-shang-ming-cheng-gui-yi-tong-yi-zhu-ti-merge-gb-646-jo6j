@@ -6,7 +6,7 @@ from decimal import Decimal
 from pathlib import Path
 
 BASE_DIR = Path(__file__).resolve().parent.parent
-SAMPLE_DIR = BASE_DIR / "sample_data"
+SAMPLE_DIR = Path(os.environ.get("MERGE_SAMPLE_DIR", str(BASE_DIR / "sample_data")))
 
 APP_NAME = "供应商主数据台账"
 RULE_VERSION = "em-1.3.0"
@@ -35,6 +35,8 @@ COLUMNS = (
     ("bank_account", False),
     ("erp_source", False),
     ("ref_master_id", False),
+    ("group_key", False),
+    ("group_name", False),
     ("ytd_amount", False),
     ("last_update", False),
 )
@@ -52,6 +54,10 @@ COLUMN_ALIASES = {
     "开户行账号": "bank_account",
     "来源系统": "erp_source",
     "主档号": "ref_master_id",
+    "集团标识": "group_key",
+    "集团编码": "group_key",
+    "集团代码": "group_key",
+    "集团名称": "group_name",
     "本年累计": "ytd_amount",
     "更新时间": "last_update",
 }
@@ -67,6 +73,9 @@ SCORE_SCALE = Decimal("0.000001")
 
 MAX_BLOCK_SIZE = 120
 MAX_CANDIDATES = 4000
+
+# 层级规则版本独立于采信规则：调整归集口径不应改变同一批输入的 run_id。
+HIERARCHY_VERSION = "H-1.0.0"
 
 TZ_DISPLAY = "Asia/Shanghai"
 PAGE_SIZE = 60
